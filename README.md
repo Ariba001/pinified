@@ -2,7 +2,7 @@ How to Run -
 
 1️. Clone the repo - 
 
-git clone https://github.com/your-username/pinified.git
+git clone https://github.com/Ariba001/pinified.git
 cd pinified
 
 2️. Create virtual environment -
