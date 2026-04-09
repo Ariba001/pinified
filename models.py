@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, ForeignKey
 from database import Base
 
 class Lead(Base):
@@ -23,3 +23,14 @@ class Lead(Base):
 
     onboarding_stage = Column(String, default="new")
     lead_score = Column(Integer, default=0)
+
+class Communication(Base):
+    __tablename__ = "communications"
+
+    id = Column(Integer, primary_key=True)
+    lead_id = Column(Integer, ForeignKey("leads.lead_id"))
+    channel = Column(String)
+    message = Column(String)
+    timestamp = Column(String)
+    callback_required = Column(String, default="no")
+    priority = Column(String, default="low")

@@ -1,7 +1,7 @@
 from database import SessionLocal
 import pandas as pd
-from database import SessionLocal
-from models import Lead
+from datetime import datetime
+from models import Lead, Communication
 import json
 from llm import call_llm
 
@@ -49,6 +49,8 @@ def ingestion_agent(file_path):
 
 def understanding_agent(state):
     message = state["message"]
+    context = retrieve_context(state["lead"])
+    history = get_history(state["lead"].lead_id)
 
     prompt = f"""
 You are an AI onboarding assistant.
@@ -56,6 +58,8 @@ You are an AI onboarding assistant.
 Extract structured data from the user message.
 
 Message: "{message}"
+Context: "{context}"
+Recent History: "{history}"
 
 Return ONLY valid JSON:
 {{
@@ -82,6 +86,10 @@ Examples:
 
     state["updates"] = {}
 
+    if "call" in message.lower():
+        state["callback_required"] = True
+        state["priority"] = "high"
+
     if data.get("aadhaar_status"):
         state["updates"]["aadhaar_status"] = data["aadhaar_status"]
 
@@ -98,6 +106,10 @@ Examples:
 def reconciliation_agent(state):
     lead = state["lead"]
     updates = state["updates"]
+
+    if state.get("callback_required"):
+        lead.callback_required = "yes"
+        lead.priority = state.get("priority", "medium")
 
     for key, value in updates.items():
         setattr(lead, key, value)
@@ -128,22 +140,80 @@ def qualification_agent(state):
 def response_agent(state):
     lead = state["lead"]
 
-    missing = []
+    if state.get("callback_required"):
+        state["response"] = "Our team will call you shortly 📞"
+        return state
 
-    if lead.aadhaar_status != "submitted":
-        missing.append("Aadhaar")
-    if lead.bank_status != "submitted":
-        missing.append("Bank")
-    if lead.rc_status != "submitted":
-        missing.append("RC")
+    context = {
+        "aadhaar": lead.aadhaar_status,
+        "bank": lead.bank_status,
+        "rc": lead.rc_status,
+        "stage": lead.onboarding_stage,
+        "score": lead.lead_score
+    }
 
-    state["response"] = f"Please upload: {', '.join(missing)}"
+    channel = state.get("channel", "whatsapp")
+    history = get_history(lead.lead_id)
 
+    prompt = f"""
+    You are an onboarding assistant.
+
+    Lead Status:
+    {context}
+
+    Conversation History:
+    {history}
+
+    Generate a response for {channel}.
+
+    Rules:
+    - WhatsApp → short, friendly
+    - Email → formal
+    - Mention missing documents
+    - Appreciate completed steps
+    """
+
+    response = call_llm(prompt)
+
+    state["response"] = response
     return state
 
 def sync_agent(state):
     db = SessionLocal()
-    db.merge(state["lead"])
+
+    lead = state["lead"]
+
+    db.merge(lead)
+
+    comm = Communication(
+        lead_id=lead.lead_id,
+        channel=state.get("channel", "unknown"),
+        message=state.get("message"),
+        timestamp=str(datetime.now())
+    )
+
+    db.add(comm)
+
     db.commit()
+    db.close()
     return state
 
+def retrieve_context(lead):
+    return f"""
+    Aadhaar: {lead.aadhaar_status}
+    Bank: {lead.bank_status}
+    RC: {lead.rc_status}
+    Stage: {lead.onboarding_stage}
+    Score: {lead.lead_score}
+    """
+
+def get_history(lead_id):
+    db = SessionLocal()
+
+    messages = db.query(Communication).filter(
+        Communication.lead_id == lead_id
+    ).all()
+
+    history = "\n".join([m.message for m in messages[-5:]])
+
+    return history

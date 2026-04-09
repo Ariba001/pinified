@@ -36,7 +36,7 @@ def upload_csv(file: UploadFile = File(...)):
     }
 
 @app.post("/message/{lead_id}")
-def process_message(lead_id: int, message: str):
+def process_message(lead_id: int, message: str, channel: str = "whatsapp"):
     db = SessionLocal()
 
     lead = db.query(Lead).filter(Lead.lead_id == lead_id).first()
@@ -46,7 +46,8 @@ def process_message(lead_id: int, message: str):
 
     state = {
         "lead": lead,
-        "message": message
+        "message": message,
+        "channel": channel
     }
 
     result = graph.invoke(state)
