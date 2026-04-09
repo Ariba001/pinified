@@ -2,6 +2,8 @@ from database import SessionLocal
 import pandas as pd
 from database import SessionLocal
 from models import Lead
+import json
+from llm import call_llm
 
 def ingestion_agent(file_path):
     db = SessionLocal()
@@ -46,20 +48,51 @@ def ingestion_agent(file_path):
     }
 
 def understanding_agent(state):
-    text = state["message"].lower()
+    message = state["message"]
 
-    updates = {}
+    prompt = f"""
+You are an AI onboarding assistant.
 
-    if "aadhaar" in text:
-        updates["aadhaar_status"] = "submitted"
+Extract structured data from the user message.
 
-    if "bank" in text:
-        updates["bank_status"] = "submitted"
+Message: "{message}"
 
-    if "rc" in text:
-        updates["rc_status"] = "submitted"
+Return ONLY valid JSON:
+{{
+    "intent": "document_update | query | callback_request",
+    "aadhaar_status": "submitted | pending | null",
+    "bank_status": "submitted | pending | null",
+    "rc_status": "submitted | pending | null"
+}}
 
-    state["updates"] = updates
+Examples:
+"I uploaded Aadhaar" →
+{{"aadhaar_status":"submitted"}}
+
+"I will upload later" →
+{{"aadhaar_status":"pending"}}
+"""
+
+    llm_output = call_llm(prompt)
+
+    try:
+        data = json.loads(llm_output)
+    except:
+        data = {}
+
+    state["updates"] = {}
+
+    if data.get("aadhaar_status"):
+        state["updates"]["aadhaar_status"] = data["aadhaar_status"]
+
+    if data.get("bank_status"):
+        state["updates"]["bank_status"] = data["bank_status"]
+
+    if data.get("rc_status"):
+        state["updates"]["rc_status"] = data["rc_status"]
+
+    state["intent"] = data.get("intent")
+
     return state
 
 def reconciliation_agent(state):

@@ -11,7 +11,7 @@ graph = build_graph()
 
 @app.post("/create_lead")
 
-def create_lead(name: str, phone: str):
+def create_lead(name: str, phone: int):
     db = SessionLocal()
 
     lead = Lead(name=name, phone=phone)
