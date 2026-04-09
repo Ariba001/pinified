@@ -1,0 +1,57 @@
+# 🔹 Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 🔹 Virtual environments
+venv/
+.env/
+.env.*
+
+# 🔹 Environment variables
+.env
+.env.local
+
+# 🔹 VS Code / IDE
+.vscode/
+.idea/
+
+# 🔹 OS files
+.DS_Store
+Thumbs.db
+
+# 🔹 Logs
+*.log
+
+# 🔹 Database
+*.db
+*.sqlite3
+
+# 🔹 Jupyter Notebook
+.ipynb_checkpoints/
+
+# 🔹 ML Models
+*.h5
+*.hdf5
+*.pkl
+*.joblib
+*.pt
+*.onnx
+
+# 🔹 Data files (important)
+data/
+*.csv
+
+# 🔹 Lock files (optional depending on your workflow)
+uv.lock
+
+# 🔹 Python version
+.python-version
+
+# 🔹 Build / dist
+build/
+dist/
+*.egg-info/
+
+# 🔹 FastAPI uploads (if any)
+uploads/
