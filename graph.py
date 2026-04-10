@@ -12,14 +12,12 @@ def build_graph():
 
     workflow = StateGraph(dict)
 
-    # Add nodes
     workflow.add_node("understanding", understanding_agent)
     workflow.add_node("reconciliation", reconciliation_agent)
     workflow.add_node("qualification", qualification_agent)
     workflow.add_node("response", response_agent)
     workflow.add_node("sync", sync_agent)
 
-    # Flow
     workflow.set_entry_point("understanding")
 
     workflow.add_edge("understanding", "reconciliation")

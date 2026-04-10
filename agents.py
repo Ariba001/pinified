@@ -4,6 +4,11 @@ from datetime import datetime
 from models import Lead, Communication
 import json
 from llm import call_llm
+from vectordb import store_message
+from vectordb import retrieve_similar
+from whatsapp import send_whatsapp
+from email_service import send_email
+from mlmodel import predict_score
 
 def ingestion_agent(file_path):
     db = SessionLocal()
@@ -48,7 +53,7 @@ def ingestion_agent(file_path):
     }
 
 def understanding_agent(state):
-    message = state["message"]
+    message = state["message"].lower()
     context = retrieve_context(state["lead"])
     history = get_history(state["lead"].lead_id)
 
@@ -69,12 +74,10 @@ Return ONLY valid JSON:
     "rc_status": "submitted | pending | null"
 }}
 
-Examples:
-"I uploaded Aadhaar" →
-{{"aadhaar_status":"submitted"}}
-
-"I will upload later" →
-{{"aadhaar_status":"pending"}}
+Rules:
+- "uploaded", "submitted", "done" → submitted
+- "not uploaded", "missing" → pending
+- If not mentioned → null
 """
 
     llm_output = call_llm(prompt)
@@ -90,14 +93,23 @@ Examples:
         state["callback_required"] = True
         state["priority"] = "high"
 
-    if data.get("aadhaar_status"):
-        state["updates"]["aadhaar_status"] = data["aadhaar_status"]
+    updates = {}
 
-    if data.get("bank_status"):
-        state["updates"]["bank_status"] = data["bank_status"]
+    if "aadhaar" in message or "adhaar" in message:
+        if "upload" in message or "submitted" in message:
+            updates["aadhaar_status"] = "submitted"
 
-    if data.get("rc_status"):
-        state["updates"]["rc_status"] = data["rc_status"]
+    if "bank" in message:
+        if "upload" in message:
+            updates["bank_status"] = "submitted"
+
+    if "rc" in message:
+        if "upload" in message:
+            updates["rc_status"] = "submitted"
+
+    print("UPDATES:", updates)
+
+    state["updates"] = updates
 
     state["intent"] = data.get("intent")
 
@@ -111,26 +123,22 @@ def reconciliation_agent(state):
         lead.callback_required = "yes"
         lead.priority = state.get("priority", "medium")
 
+    print("BEFORE:", lead.aadhaar_status)
+
     for key, value in updates.items():
         setattr(lead, key, value)
 
+    print("AFTER:", lead.aadhaar_status)
     return state
 
 def qualification_agent(state):
     lead = state["lead"]
 
-    score = 0
-
-    if lead.aadhaar_status == "submitted":
-        score += 30
-    if lead.bank_status == "submitted":
-        score += 30
-    if lead.rc_status == "submitted":
-        score += 40
+    score = predict_score(lead)
 
     lead.lead_score = score
 
-    if score == 100:
+    if score >= 90:
         lead.onboarding_stage = "completed"
     else:
         lead.onboarding_stage = "in_progress"
@@ -139,10 +147,6 @@ def qualification_agent(state):
 
 def response_agent(state):
     lead = state["lead"]
-
-    if state.get("callback_required"):
-        state["response"] = "Our team will call you shortly 📞"
-        return state
 
     context = {
         "aadhaar": lead.aadhaar_status,
@@ -175,7 +179,17 @@ def response_agent(state):
 
     response = call_llm(prompt)
 
-    state["response"] = response
+    if state.get("callback_required"):
+        state["response"] = "Our team will call you shortly to assist you further."
+    else:
+        state["response"] = call_llm(prompt)
+
+    if channel == "whatsapp":
+        send_whatsapp(lead.phone, response)
+
+    elif channel == "email":
+        send_email(lead.email, "Onboarding Update", response)
+        
     return state
 
 def sync_agent(state):
@@ -193,7 +207,7 @@ def sync_agent(state):
     )
 
     db.add(comm)
-
+    store_message(lead.lead_id, state["message"])
     db.commit()
     db.close()
     return state
@@ -217,3 +231,11 @@ def get_history(lead_id):
     history = "\n".join([m.message for m in messages[-5:]])
 
     return history
+
+def get_rag_context(state):
+    lead = state["lead"]
+    query = state["message"]
+
+    similar_msgs = retrieve_similar(lead.lead_id, query)
+
+    return "\n".join(similar_msgs[0]) if similar_msgs else ""
