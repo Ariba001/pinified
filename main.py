@@ -36,13 +36,9 @@ def upload_csv(file: UploadFile = File(...)):
     }
 
 @app.post("/message/{lead_id}")
-def process_message(lead_id: int, message: str, channel: str = "whatsapp"):
+def process_message(lead_id: int, message: str, channel: str = "whatsapp/email"):
     db = SessionLocal()
-
     lead = db.query(Lead).filter(Lead.lead_id == lead_id).first()
-
-    if not lead:
-        return {"error": "Lead not found"}
 
     state = {
         "lead": lead,
@@ -52,8 +48,32 @@ def process_message(lead_id: int, message: str, channel: str = "whatsapp"):
 
     result = graph.invoke(state)
 
-    return {
+    missing_fields = []
+
+    if lead.aadhaar_status != "submitted":
+        missing_fields.append("aadhaar")
+    if lead.bank_status != "submitted":
+        missing_fields.append("bank")
+    if lead.rc_status != "submitted":
+        missing_fields.append("rc")
+
+    output = {
         "lead_score": lead.lead_score,
-        "stage": lead.onboarding_stage,
-        "response": result["response"]
+        "onboarding_stage": lead.onboarding_stage,
+        "missing_fields": missing_fields,
+        "preferred_channel": lead.preferred_channel,
+        "latest_update_source": channel,
+        "extracted_information": state.get("updates", {}),
+        "next_best_action": "Collect missing documents" if missing_fields else "Onboarding complete",
+        "whatsapp_draft": result.get("whatsapp_response"),
+        "email_draft": result.get("email_response"),
+        "callback_required": state.get("callback_required", False),
+        "priority": state.get("priority", "low"),
+        "updated_database_state": {
+            "aadhaar": lead.aadhaar_status,
+            "bank": lead.bank_status,
+            "rc": lead.rc_status
+        }
     }
+
+    return output

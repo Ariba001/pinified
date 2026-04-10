@@ -8,7 +8,7 @@ from vectordb import store_message
 from vectordb import retrieve_similar
 from whatsapp import send_whatsapp
 from email_service import send_email
-from mlmodel import predict_score
+from score import calculate_score
 
 def ingestion_agent(file_path):
     db = SessionLocal()
@@ -134,11 +134,10 @@ def reconciliation_agent(state):
 def qualification_agent(state):
     lead = state["lead"]
 
-    score = predict_score(lead)
-
+    score = calculate_score(lead)
     lead.lead_score = score
 
-    if score >= 90:
+    if score == 100:
         lead.onboarding_stage = "completed"
     else:
         lead.onboarding_stage = "in_progress"
@@ -147,17 +146,34 @@ def qualification_agent(state):
 
 def response_agent(state):
     lead = state["lead"]
-
-    context = {
-        "aadhaar": lead.aadhaar_status,
-        "bank": lead.bank_status,
-        "rc": lead.rc_status,
-        "stage": lead.onboarding_stage,
-        "score": lead.lead_score
-    }
-
     channel = state.get("channel", "whatsapp")
     history = get_history(lead.lead_id)
+
+    acknowledged = []
+    missing = []
+
+    if lead.aadhaar_status == "submitted":
+        acknowledged.append("Aadhaar")
+    else:
+        missing.append("Aadhaar")
+
+    if lead.bank_status == "submitted":
+        acknowledged.append("Bank")
+    else:
+        missing.append("Bank")
+
+    if lead.rc_status == "submitted":
+        acknowledged.append("RC")
+    else:
+        missing.append("RC")
+
+    context = f"""
+    Aadhaar: {lead.aadhaar_status}
+    Bank: {lead.bank_status}
+    RC: {lead.rc_status}
+    Stage: {lead.onboarding_stage}
+    Score: {lead.lead_score}
+    """
 
     prompt = f"""
     You are an onboarding assistant.
@@ -165,31 +181,49 @@ def response_agent(state):
     Lead Status:
     {context}
 
+    Acknowledged Documents: {acknowledged}
+    Missing Documents: {missing}
+
     Conversation History:
     {history}
 
-    Generate a response for {channel}.
+    STRICT RULES:
+    - Only mention documents in Acknowledged list
+    - Only ask for documents in Missing list
+    - Do NOT confuse Aadhaar, Bank, RC
+    - Do NOT assume anything
 
-    Rules:
+    Style:
     - WhatsApp → short, friendly
     - Email → formal
-    - Mention missing documents
-    - Appreciate completed steps
+
+    Generate response for {channel}.
     """
 
-    response = call_llm(prompt)
-
     if state.get("callback_required"):
-        state["response"] = "Our team will call you shortly to assist you further."
+        response = "Our team will call you shortly to assist you further."
     else:
-        state["response"] = call_llm(prompt)
+        response = call_llm(prompt)
+
+    whatsapp_prompt = prompt + "\nGenerate ONLY WhatsApp message."
+    whatsapp_response = call_llm(whatsapp_prompt)
+
+    email_prompt = prompt + "\nGenerate ONLY Email message."
+    email_response = call_llm(email_prompt)
+
+    state["whatsapp_response"] = whatsapp_response
+    state["email_response"] = email_response
 
     if channel == "whatsapp":
-        send_whatsapp(lead.phone, response)
+        send_whatsapp(lead.phone, whatsapp_response)
 
     elif channel == "email":
-        send_email(lead.email, "Onboarding Update", response)
-        
+        send_email(lead.email, "Onboarding Update", email_response)
+
+    print("FINAL CONTEXT:", context)
+    print("ACKNOWLEDGED:", acknowledged)
+    print("MISSING:", missing)
+
     return state
 
 def sync_agent(state):
